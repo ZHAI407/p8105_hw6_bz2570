@@ -16,12 +16,12 @@ set.seed(123)
 ## Problem 1
 
 ```{r}
-homicide_df <- 
+homicide_df = 
   read_csv("data/homicide-data.csv") |> 
   janitor::clean_names() |> 
   mutate(
     city_state = str_c(city, ", ", state),
-    solved_homicides = as.numeric(disposition == "Closed by arrest"),
+    resolved = as.numeric(disposition == "Closed by arrest"),
     victim_age = as.numeric(victim_age)
   ) |> 
   filter(
@@ -30,13 +30,86 @@ homicide_df <-
   )
 ```
 
-```{r}
+**For the city of Baltimore, MD**
 
+```{r}
+# Fit a logistic regression and save the output
+baltimore_df = 
+  homicide_df |> 
+  filter(city_state == "Baltimore, MD") |> 
+  select(resolved, victim_age, victim_sex, victim_race)
+
+baltimore_fit = 
+  baltimore_df |> 
+  glm(resolved ~ victim_age + victim_sex + victim_race, data = _, family = binomial())
+
+summary(baltimore_fit)
+
+# Obtain the estimate and CI of adjusted OR for solving homicides comparing male to female (all other variables fixed)
+baltimore_results = 
+  baltimore_fit |> 
+  broom::tidy() |> 
+  mutate(
+    OR = exp(estimate),
+    CI_lower = exp(estimate - 1.96 * std.error),
+    CI_upper = exp(estimate + 1.96 * std.error) 
+  ) |>
+  filter(term == "victim_sexMale") |>   
+  select(term, log_OR = estimate, OR, CI_lower, CI_upper)
+
+baltimore_results |> 
+  knitr::kable(digits = 3,
+               caption = "For solving homicides comparing male victims to female victims")
+```
+
+In Baltimore, MD, after controlling for victim age and race, the odds ratio of solving homicides for male victims were `r round(baltimore_results$OR, 3)` times the odds for female victims with 95% confidence interval (`r round(baltimore_results$CI_lower, 3)`,`r round(baltimore_results$CI_upper, 3)`), indicating that homicides with female victims were significantly more likely to be resolved.
+
+**For all cities**
+
+```{r}
+# Fit logistic regression and extract adjusted OR and CI for solving homicides comparing male to female
+city_or_results = 
+  homicide_df |> 
+  nest(data = -city_state) |> 
+  mutate(
+    models = map(data, \(df) glm(resolved ~ victim_age + victim_sex + victim_race, 
+                                data = df, family = binomial())),
+    results = map(models, broom::tidy)
+  ) |> 
+  select(-data, -models) |> 
+  unnest(results) |> 
+  filter(term == "victim_sexMale") |> 
+  mutate(
+    OR = exp(estimate),
+    CI_lower = exp(estimate - 1.96 * std.error),
+    CI_upper = exp(estimate + 1.96 * std.error)
+  ) |> 
+  select(city_state, log_OR = estimate, OR, CI_lower, CI_upper)
+
+city_or_results |>
+  knitr::kable(digits = 3,
+               caption = "For solving homicides comparing male victims to female victims")
 ```
 
 ```{r}
-
+# Create a plot showing estimated ORs and CIs for each city
+city_or_results |> 
+  mutate(city_state = fct_reorder(city_state, OR)) |> 
+  ggplot(aes(x = city_state, y = OR)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.3, color = "blue") + 
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8)) + 
+  labs(
+    title = "Adjusted OR for solving homicides comparing male to female victims for each city",
+    x = "City", 
+    y = "Estimated Odds Ratio"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 11))
 ```
+
+The plot shows substantial variation in the adjusted odds ratios across cities, ranging from approximately `r round(min(city_or_results$OR), 2)` to `r round(max(city_or_results$OR), 2)`. In all cities, `r sum(city_or_results$OR > 1)` cities had ORs greater than 1, indicating higher odds of resolution for male victims, while `r sum(city_or_results$OR < 1)` cities had ORs less than 1, suggesting higher odds of resolution for female victims. In `r sum(city_or_results$CI_lower > 1 | city_or_results$CI_upper < 1)` cities, the 95% confidence intervals didn't include 1, indicating statistically significant gender disparities in homicide resolution rates.
 
 ## Problem 2
 
