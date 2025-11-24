@@ -62,7 +62,7 @@ baltimore_results |>
                caption = "For solving homicides comparing male victims to female victims")
 ```
 
-In Baltimore, MD, after controlling for victim age and race, the odds ratio of solving homicides for male victims were `r round(baltimore_results$OR, 3)` times the odds for female victims with 95% confidence interval (`r round(baltimore_results$CI_lower, 3)`,`r round(baltimore_results$CI_upper, 3)`), indicating that homicides with female victims were significantly more likely to be resolved.
+In Baltimore, MD, after controlling for victim age and race, the odds ratio of solving homicides for male victims were `r round(baltimore_results$OR, 3)` times the odds for female victims with 95% confidence interval [`r round(baltimore_results$CI_lower, 3)`,`r round(baltimore_results$CI_upper, 3)`], indicating that homicides with female victims were significantly more likely to be resolved.
 
 **For all cities**
 
@@ -114,16 +114,79 @@ The plot shows substantial variation in the adjusted odds ratios across cities, 
 ## Problem 2
 
 ```{r}
-
+data("weather_df")
 ```
 
 ```{r}
+bootstrap_results = 
+  weather_df |> 
+  janitor::clean_names() |> 
+  modelr::bootstrap(n = 5000) |> 
+  mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df)), 
+    results_1 = map(models, broom::glance),
+    results_2 = map(models, broom::tidy)
+  ) |> 
+  select(-strap, -models) |> 
+  unnest(results_1) |> 
+  select(bootstrap_id = .id, r_squared = r.squared, results_2) |> 
+  unnest(results_2) |> 
+  filter(term %in% c("tmin", "prcp")) |> 
+  select(bootstrap_id, r_squared, term, coefficient = estimate) |> 
+  pivot_wider(
+    names_from = term,
+    values_from = coefficient
+  ) |> 
+  mutate(beta_ratio = tmin / prcp) |> 
+  select(bootstrap_id, r_squared, beta_ratio)
 
+bootstrap_results |> 
+  head(5) |> 
+  knitr::kable(digits = 3, 
+               caption = "Above showing first 5 rows of bootstrap_results")
 ```
 
 ```{r}
-
+# Plot the distributions of estimates
+bootstrap_results |> 
+  pivot_longer(
+    r_squared:beta_ratio,
+    names_to = "statistic",
+    values_to = "estimate"
+  ) |> 
+  ggplot(aes(x = estimate)) + 
+  geom_density() + 
+  facet_wrap(~statistic, scales = "free") + 
+  labs(title = "Distributions of estimated R-squared and beta ratio",
+       x = "Estimate",
+       y = "Density"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 11))
 ```
+
+Above distributions are derived from 5000 bootstrap samples, reflecting the variability of the estimated beta ratio and R-squared:
+
+The distribution of beta_ratio is unimodal, which begins with a density nearly zero at `r round(min(bootstrap_results$beta_ratio, na.rm = TRUE), 0)`, rises obviously, peaks around `r round(mean(bootstrap_results$beta_ratio, na.rm = TRUE), 0)`, and then decreases until the density approaches zero at `r round(max(bootstrap_results$beta_ratio, na.rm = TRUE), 0)`.
+
+The distribution of r_squared is also unimodal, which starts with a zero density at `r round(min(bootstrap_results$r_squared, na.rm = TRUE), 3)`, increases sharply, peaks around `r round(mean(bootstrap_results$r_squared, na.rm = TRUE), 3)`, and then decreases as it approaches `r round(max(bootstrap_results$r_squared, na.rm = TRUE), 3)`.
+
+```{r}
+# Provide 95% confidence interval
+bootstrap_ci = 
+  bootstrap_results |> 
+  summarize(
+    r_squared_lower = quantile(r_squared, 0.025),
+    r_squared_upper = quantile(r_squared, 0.975),
+    beta_ratio_lower = quantile(beta_ratio, 0.025, na.rm = TRUE),
+    beta_ratio_upper = quantile(beta_ratio, 0.975, na.rm = TRUE)
+  ) 
+  
+bootstrap_ci |> 
+  knitr::kable(digits = 3)
+```
+
+Based on 5000 bootstrap samples, the 95% confidence interval for estimated **R-squared** is [`r round(bootstrap_ci$r_squared_lower, 3)`, `r round(bootstrap_ci$r_squared_upper, 3)`]; and the 95% confidence interval for estimated **β1/β2** is [`r round(bootstrap_ci$beta_ratio_lower, 3)`, `r round(bootstrap_ci$beta_ratio_upper, 3)`].
 
 ## Problem 3
 
