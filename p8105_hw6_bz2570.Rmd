@@ -99,14 +99,14 @@ city_or_results |>
   geom_point() + 
   geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
                 width = 0.3, color = "blue") + 
-  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8)) + 
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") + 
   labs(
     title = "Adjusted OR for solving homicides comparing male to female victims for each city",
     x = "City", 
     y = "Estimated Odds Ratio"
   ) +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 11))
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 11),
+        axis.text.x = element_text(angle = 90, hjust = 1, size = 8))
 ```
 
 The plot shows substantial variation in the adjusted odds ratios across cities, ranging from approximately `r round(min(city_or_results$OR), 2)` to `r round(max(city_or_results$OR), 2)`. In all cities, `r sum(city_or_results$OR > 1)` cities had ORs greater than 1, indicating higher odds of resolution for male victims, while `r sum(city_or_results$OR < 1)` cities had ORs less than 1, suggesting higher odds of resolution for female victims. In `r sum(city_or_results$CI_lower > 1 | city_or_results$CI_upper < 1)` cities, the 95% confidence intervals didn't include 1, indicating statistically significant gender disparities in homicide resolution rates.
@@ -191,15 +191,126 @@ Based on 5000 bootstrap samples, the 95% confidence interval for estimated **R-s
 ## Problem 3
 
 ```{r}
+# Load and clean the data
+birthweight_df = 
+  read_csv("data/birthweight.csv") |> 
+  janitor::clean_names() |> 
+  mutate(
+    babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace)
+  ) |> 
+  drop_na()
+```
 
+#### Propose a regression model for birthweight
+
+```{r}
+full_model = lm(bwt ~ ., data = birthweight_df)
+stepwise_model = step(full_model, direction = "both", trace = 0)
+
+stepwise_model |> 
+  broom::tidy() |> 
+  knitr::kable(digits = 3, caption = "Stepwise Regression Results for Birthweight")
+
+stepwise_formula = formula(stepwise_model)
+```
+
+**Modeling process:** This model based on a data-driven model-building process. Using stepwise regression (both directions) to select the most relevant predictors for birthweight from all available variables.
+
+```{r}
+# Plot model residuals against fitted values using add_predictions and add_residuals
+birthweight_df |> 
+  modelr::add_predictions(stepwise_model) |> 
+  modelr::add_residuals(stepwise_model) |> 
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(se = FALSE, color = "red") +
+  labs(
+    title = "Residuals against Fitted Values",
+    subtitle = "Stepwise Regression Model",
+    x = "Fitted Values",
+    y = "Residuals"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        plot.subtitle = element_text(hjust = 0.5, face = "bold", size = 12))
+```
+
+#### Make comparison in terms of the cross-validated prediction error
+
+```{r}
+cv_results = 
+  birthweight_df |> 
+  crossv_mc(100) |> 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  ) |> 
+  mutate(
+    # Stepwise model (both)
+    stepwise = map(train, \(df) lm(stepwise_formula, data = df)),
+    # Linear model only contain main effects (length + gestational age)
+    linear = map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
+    # Interaction model (head circumference, length, sex)
+    interaction = map(train, \(df) lm(bwt ~ bhead * blength * babysex, data = df))
+  ) |> 
+  mutate(
+    rmse_stepwise = map2_dbl(stepwise, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_linear = map2_dbl(linear, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_interaction = map2_dbl(interaction, test, \(mod, df) rmse(model = mod, data = df))
+  )
 ```
 
 ```{r}
-
+cv_results |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) |> 
+  mutate(model = fct_inorder(model)) |> 
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_violin() +
+  labs(
+    title = "Cross-validated RMSE Comparison",
+    x = "Model",
+    y = "RMSE"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        axis.text.x = element_text(size = 11))
 ```
 
 ```{r}
-
+cv_summary = 
+  cv_results |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) |> 
+  group_by(model) |> 
+  summarize(
+    mean_rmse = mean(rmse),
+    sd_rmse = sd(rmse),
+    n_folds = n()
+  ) |> 
+  mutate(
+    model_name = case_when(
+      model == "stepwise" ~ "Stepwise Model",
+      model == "linear" ~ "Linear Model", 
+      model == "interaction" ~ "Interaction Model"
+    )
+  ) |> 
+  select(model_name, mean_rmse, sd_rmse) |> 
+  arrange(mean_rmse)
+cv_summary |> 
+  knitr::kable(digits = 3)
 ```
 
-
+Among the three models, the stepwise regression have the best predictive performance with a cross-validated RMSE of `r round(cv_summary$mean_rmse[1], 3)`.
