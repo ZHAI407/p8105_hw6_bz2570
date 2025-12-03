@@ -111,6 +111,8 @@ city_or_results |>
 
 The plot shows substantial variation in the adjusted odds ratios across cities, ranging from approximately `r round(min(city_or_results$OR), 2)` to `r round(max(city_or_results$OR), 2)`. In all cities, `r sum(city_or_results$OR > 1)` cities had ORs greater than 1, indicating higher odds of resolution for male victims, while `r sum(city_or_results$OR < 1)` cities had ORs less than 1, suggesting higher odds of resolution for female victims. In `r sum(city_or_results$CI_lower > 1 | city_or_results$CI_upper < 1)` cities, the 95% confidence intervals didn't include 1, indicating statistically significant gender disparities in homicide resolution rates.
 
+Among the cities with the lowest ORs, **New York, NY** stand out, with estimated ORs clearly below 0.5, indicating that homicides involving male victims have lower odds of being solved compared to those involving female victims. In contrast, several cities display relatively high ORs. For example, **Albuquerque, NM**, **Stockton, CA** and **Fresno, CA** show OR estimates above 1, suggesting a higher likelihood of solving cases involving male victims. However, these higher ORs often come with wide confidence intervals, indicating substantial uncertainty in the estimates.
+
 ## Problem 2
 
 ```{r}
